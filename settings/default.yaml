@@ -1,0 +1,9 @@
+amqp:
+  url: 'amqp://guest:guest@localhost/'
+gate:
+  debug: true
+  protocols:
+    - traccar_new
+  protocols_settings:
+    traccar_new:
+      port: 8000
