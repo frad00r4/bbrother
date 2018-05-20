@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+       #map {
+        height: 400px;
+        width: 100%;
+       }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAWh14pNiO2-SoVeDWboJlQlvEiF3Q4dc0"></script>
+  </head>
+  <body>
+    <h3>My Google Maps Demo</h3>
+    <div id="map"></div>
+    <script>
+      $(document).ready(function(){
+          $.ajax('http://127.0.0.1:8080/',{}).done(function(data){
+              json_data = $.parseJSON(data)
+              console.log(json_data[0]);
+              var map = new google.maps.Map(document.getElementById('map'), {
+                  zoom: 4,
+                  center: json_data[0]
+              });
+              json_data.forEach(function(item) {
+                  var marker = new google.maps.Marker({
+                      position: item,
+                      map: map
+                  });
+              });
+          });
+      });
+    </script>
+  </body>
+</html>

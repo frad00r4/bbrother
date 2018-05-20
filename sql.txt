@@ -1,0 +1,14 @@
+CREATE TABLE test (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `user_id` INT(11) NOT NULL,
+    `lat` FLOAT NOT NULL,
+    `lon` FLOAT NOT NULL,
+    `speed` FLOAT NOT NULL,
+    `altitude` FLOAT NOT NULL,
+    `stamp` TIMESTAMP NOT NULL,
+    PRIMARY KEY (id),
+    KEY (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+INSERT INTO test (user_id, lat, lon, speed, altitude, stamp) VALUES (1, 1, 1, 1, 1, 1)

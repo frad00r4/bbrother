@@ -28,7 +28,7 @@ class WebProtocol(Resource):
             return b'Bad request'
 
         # Skip unneeded fields
-        data = {field: request.args.get(field) for field in self.fields}
+        data = {field: request.args[field][0] for field in self.fields if request.args.get(field)}
         try:
             self._queue.put_nowait(data)
         except Full:

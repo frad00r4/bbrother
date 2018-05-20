@@ -1,9 +1,17 @@
 amqp:
   url: 'amqp://guest:guest@localhost/'
+debug: true
 gate:
-  debug: true
   protocols:
     - traccar_new
   protocols_settings:
     traccar_new:
       port: 8000
+db_backend:
+  module: adbapi
+  engine: pymysql
+  database: tracker
+  user: root
+  amqp_listener: true
+api:
+  port: 8080
