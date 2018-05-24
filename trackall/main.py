@@ -5,14 +5,14 @@ import sys
 import importlib
 
 try:
-    from Queue import Queue
+    from Queue import Queue, Empty
 except ImportError:
-    from queue import Queue
+    from queue import Queue, Empty
 
 from twisted.internet import reactor
 from twisted.python import log
 
-from trackall.amqp import AMQPClient, AMQPClientReader
+from trackall.amqp import AMQPClient, GatePublisherCallback, DBInsertCallback
 from trackall.api import API
 from trackall.config import config
 
@@ -21,42 +21,57 @@ def run():
     if config.get('debug', False) is True:
         log.startLogging(sys.stdout)
 
+    protocol_modules = {}
+    db_engine_module = {}
+
     # gates
-    gate_config = config.get('gate')
-    protocols = config.get('gate', {}).get('protocols', [])
-    if gate_config and protocols:
+    gate_config = config.get('gate', {})
+    if gate_config:
         queues = []
 
-        protocol_modules = \
-            {protocol: importlib.import_module('trackall.protocols.{}'.format(protocol)) for protocol in protocols}
-        print(' [x] Protocols loaded')
+        for gate_instance_name, gate_instance_config in gate_config.items():
+            if not gate_instance_config.get('module'):
+                continue
 
-        for protocol_name, protocol_module in protocol_modules.items():
+            if gate_instance_config['module'] not in protocol_modules.keys():
+                protocol_modules[gate_instance_config['module']] = \
+                    importlib.import_module('trackall.protocols.{}'.format(gate_instance_config['module']))
+                print(' [x] Protocol loaded {}'.format(gate_instance_config['module']))
+
             queue = Queue()
-            protocol_module.initial(gate_config.get('protocols_settings', {}).get(protocol_name), queue)
+            protocol_modules[gate_instance_config['module']].initial(gate_instance_config, queue)
             queues.append(queue)
-        print(' [x] Gate is awaiting for requests')
+            print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
 
-        amqp = AMQPClient(config['amqp']['url'], queues)
-        amqp.connect()
+            gate_callback = GatePublisherCallback(gate_instance_config, queue)
+            amqp_connection = AMQPClient(config['amqp']['url'], gate_callback.callback, gate_instance_name)
+            amqp_connection.connect()
 
-    # database
-    database_config = config.get('db_backend')
-    db_engine = config.get('db_backend', {}).get('module')
-    db_object = None
-    if database_config and db_engine:
-        db_module = importlib.import_module('trackall.db.{}'.format(db_engine))
-        db_object = db_module.BackendDB(database_config)
+    # databases insert records from gate
+    db_insert_backend_config = config.get('db_insert_backend', {})
+    if db_insert_backend_config:
 
-        if database_config.get('amqp_listener') is True:
-            amqp_reader = AMQPClientReader(config['amqp']['url'], db_object.insert_geo_record)
-            amqp_reader.connect()
-            print(' [x] AMQP Listener start')
+        for db_engine_instance_name, db_engine_instance_config in db_insert_backend_config.items():
+            if not db_engine_instance_config.get('module'):
+                continue
+
+            if db_engine_instance_config['module'] not in db_engine_module.keys():
+                db_engine_module[db_engine_instance_config['module']] = \
+                    importlib.import_module('trackall.db.{}'.format(db_engine_instance_config['module']))
+                print(' [x] DB engine loaded {}'.format(db_engine_instance_config['module']))
+
+            db_object = db_engine_module[db_engine_instance_config['module']].BackendDB(db_engine_instance_config,
+                                                                                        db_engine_instance_name)
+
+            db_insert_callback = DBInsertCallback(db_engine_instance_config, db_object.insert_geo_record)
+            amqp_connection = AMQPClient(config['amqp']['url'], db_insert_callback.callback, db_engine_instance_name)
+            amqp_connection.connect()
+            print(' [x] AMQP Gate Listener for {} start'.format(db_engine_instance_name))
 
     # api
-    api_config = config.get('api')
-    if api_config and db_object:
-        API.run(api_config, db_object.get_geo_path)
+    # api_config = config.get('api')
+    # if api_config and db_object:
+    #     API.run(api_config, db_object.get_geo_path)
 
     # Run
     reactor.run()
