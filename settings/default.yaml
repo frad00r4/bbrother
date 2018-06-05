@@ -7,12 +7,25 @@ gate:
     port: 8000
     exchange: ''
     routing_key: test_queue
-db_insert_backend:
-  db_insert_backend_test_1:
+db_write_backend:
+  db_write_backend_test_1:
     module: adbapi
     engine: pymysql
     database: tracker
     user: root
-    queue: test_queue
-api:
-  port: 8080
+    queue: test_queue_write
+db_read_backend:
+  db_read_backend_test_1:
+    module: adbapi
+    engine: pymysql
+    database: tracker
+    user: root
+    listeners: 1
+    queue: test_queue_read
+external_api:
+  external_api_test_1:
+    module: http
+    port: 8080
+    exchange: ''
+    routing_key: test_queue
+    amqp_connections: 1

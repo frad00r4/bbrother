@@ -61,6 +61,7 @@ class AMQPClient(object):
     @inlineCallbacks
     def read(self, context):
         if context.queue is None:
+            yield self.channel.queue_declare(queue=context.queue_name, auto_delete=True, exclusive=False)
             context.queue, _ = yield self.channel.basic_consume(queue=context.queue_name, no_ack=True)
 
         _, _, properties, body = yield context.queue.get()
@@ -105,3 +106,27 @@ class DBInsertCallback(object):
         properties, message = yield amqp_instance.read(self)
         yield self.db_callback(message)
         returnValue(None)
+
+
+class DBReadGeoDataCallback(object):
+    def __init__(self, config, callback):
+        self.queue_name = config.get('queue')
+        self.db_callback = callback
+        self.queue = None
+
+    @inlineCallbacks
+    def callback(self, amqp_instance):
+        properties, message = yield amqp_instance.read(self)
+        response = yield self.db_callback(message)
+        yield amqp_instance.publish('', properties.reply_to, response)
+        returnValue(None)
+
+
+class APIRequestCallback(object):
+    def __init__(self, config):
+        self.exchange = config.get('exchange', '')
+        self.routing_key = config.get('routing_key', '')
+
+    @inlineCallbacks
+    def callback(self, amqp_instance):
+        yield amqp_instance.publish(self.exchange, self.routing_key, message)

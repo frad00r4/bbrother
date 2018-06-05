@@ -35,7 +35,7 @@ class BackendDB(object):
 
         returnValue(None)
 
-    def get_geo_path(self):
+    def get_geo_path(self, message):
         try:
             return self.db_pool.runQuery('select * from test ORDER BY stamp ASC;')
         except OperationalError:
