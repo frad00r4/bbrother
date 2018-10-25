@@ -43,10 +43,6 @@ class WebApi(Resource):
         d = self.callback(api_request)
         d.addCallback(self._api_response, request)
 
-    def get_geo_request(self, request):
-        # TODO: stub
-        return 'some request'
-
 
 def initial(config, callback):
     site = Site(WebApi(callback))

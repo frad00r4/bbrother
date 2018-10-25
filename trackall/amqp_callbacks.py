@@ -69,20 +69,5 @@ class RequestResponseCallback(object):
             self.amqp_callback,
             self.name
         )
-        print('Ready')
         result = yield amqp_connection.run(message=message)
-        print('Done')
         returnValue(result)
-
-
-class DBInsertCallback(object):
-    def __init__(self, config, callback):
-        self.queue_name = config.get('queue')
-        self.db_callback = callback
-        self.queue = None
-
-    @inlineCallbacks
-    def callback(self, amqp_instance):
-        properties, message = yield amqp_instance.read(self)
-        yield self.db_callback(message)
-        returnValue(None)
