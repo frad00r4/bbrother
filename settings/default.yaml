@@ -1,31 +1,26 @@
 amqp:
   url: 'amqp://guest:guest@localhost/'
 debug: true
-gate:
+gates:
   gate_test_1:
     module: traccar_new
+    amqp_url: 'amqp://guest:guest@localhost/'
     port: 8000
     exchange: ''
     routing_key: test_queue
-db_write_backend:
-  db_write_backend_test_1:
+databases:
+  db_backend_test_1:
     module: adbapi
+    amqp_url: 'amqp://guest:guest@localhost/'
+    listen_queue: test_db_queue
     engine: pymysql
     database: tracker
     user: root
-    queue: test_queue_write
-db_read_backend:
-  db_read_backend_test_1:
-    module: adbapi
-    engine: pymysql
-    database: tracker
-    user: root
-    listeners: 1
-    queue: test_queue_read
-external_api:
-  external_api_test_1:
+api:
+  web_api_test_1:
     module: http
+    amqp_url: 'amqp://guest:guest@localhost/'
     port: 8080
     exchange: ''
-    routing_key: test_queue
+    routing_key: test_db_queue
     amqp_connections: 1

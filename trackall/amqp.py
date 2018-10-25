@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals, absolute_import
 
-try:
-    from Queue import Empty
-except ImportError:
-    from queue import Empty
-
+import abc
 import ujson
+import six
 
 from twisted.internet import task
 from twisted.internet.defer import inlineCallbacks, returnValue
@@ -20,7 +17,9 @@ from pika.spec import BasicProperties
 from trackall.main import reactor
 
 
-class AMQPClient(object):
+@six.add_metaclass(abc.ABCMeta)
+class AMQPClientAbstract(object):
+
     def __init__(self, url, callback, name=''):
         self.parameters = URLParameters(url)
         self.client = ClientCreator(reactor, TwistedProtocolConnection, self.parameters)
@@ -32,31 +31,13 @@ class AMQPClient(object):
         failure.trap(ConnectionRefusedError, ChannelClosed)
         print(' [!] Connection failed {}: {}'.format(self.name, failure.getErrorMessage()))
         # Try to reconnect
-        reactor.callLater(2, self.connect)
-
-    def connect(self):
-        d = self.client.connectTCP(self.parameters.host, self.parameters.port)
-        d.addCallbacks(lambda protocol: protocol.ready, self.error_connection_callback)
-        d.addCallback(self.run_loop)
+        reactor.callLater(2, self.run)
 
     @inlineCallbacks
-    def run_loop(self, connection):
-        if not connection:
-            returnValue(None)
-        print(' [x] Connected to AMQP {}'.format(self.name))
-
-        self.channel = yield connection.channel()
-
-        loop = task.LoopingCall(self.callback, self)
-        d = loop.start(0.1)
-        d.addErrback(self.error_connection_callback)
-
-        returnValue(None)
-
-    @inlineCallbacks
-    def publish(self, exchange, routing_key, message):
-        properties = BasicProperties()
+    def publish(self, exchange, routing_key, message, **kwargs):
+        properties = BasicProperties(**kwargs)
         yield self.channel.basic_publish(exchange, routing_key, ujson.dumps(message), properties)
+        returnValue(None)
 
     @inlineCallbacks
     def read(self, context):
@@ -73,60 +54,58 @@ class AMQPClient(object):
             returnValue((None, None))
         returnValue((properties, message))
 
+    @abc.abstractmethod
+    def run(self):
+        raise NotImplementedError
 
-class GatePublisherCallback(object):
-    def __init__(self, config, queue):
-        self.exchange = config.get('exchange', '')
-        self.routing_key = config.get('routing_key', '')
+
+class AMQPClientPermanent(AMQPClientAbstract):
+
+    def run(self):
+        d = self.client.connectTCP(self.parameters.host, self.parameters.port)
+        d.addCallbacks(lambda protocol: protocol.ready, self.error_connection_callback)
+        d.addCallback(self.run_loop)
+
+    @inlineCallbacks
+    def run_loop(self, connection):
+        if not connection:
+            returnValue(None)
+        print(' [x] Connected to AMQP {} permanent'.format(self.name))
+
+        self.channel = yield connection.channel()
+
+        loop = task.LoopingCall(self.callback, self)
+        d = loop.start(0.1)
+        d.addErrback(self.error_connection_callback)
+
+        returnValue(None)
+
+
+class AMQPClient(AMQPClientAbstract):
+
+    def run(self, *args, **kwargs):
+        d = self.client.connectTCP(self.parameters.host, self.parameters.port)
+        d.addCallbacks(lambda protocol: protocol.ready, self.error_connection_callback)
+        d.addCallback(self.execute_callback, *args, **kwargs)
+        return d
+
+    @inlineCallbacks
+    def execute_callback(self, connection, *args, **kwargs):
+        if not connection:
+            returnValue(None)
+        print(' [x] Connected to AMQP {}'.format(self.name))
+
+        self.channel = yield connection.channel()
+        result = yield self.callback(self, *args, **kwargs)
+        self.channel.close()
+        self.channel = None
+        connection.close()
+        print(' [x] AMQP Disconnected {}'.format(self.name))
+
+        returnValue(result)
+
+
+class ReplyToCheckerContext(object):
+    def __init__(self, queue_name, queue):
         self.queue = queue
-
-    @inlineCallbacks
-    def callback(self, amqp_instance):
-        while True:
-            message = ''
-            try:
-                message = self.queue.get_nowait()
-            except Empty:
-                returnValue(None)
-            try:
-                yield amqp_instance.publish(self.exchange, self.routing_key, message)
-            except Exception:
-                self.queue.put(message)
-                raise
-
-
-class DBInsertCallback(object):
-    def __init__(self, config, callback):
-        self.queue_name = config.get('queue')
-        self.db_callback = callback
-        self.queue = None
-
-    @inlineCallbacks
-    def callback(self, amqp_instance):
-        properties, message = yield amqp_instance.read(self)
-        yield self.db_callback(message)
-        returnValue(None)
-
-
-class DBReadGeoDataCallback(object):
-    def __init__(self, config, callback):
-        self.queue_name = config.get('queue')
-        self.db_callback = callback
-        self.queue = None
-
-    @inlineCallbacks
-    def callback(self, amqp_instance):
-        properties, message = yield amqp_instance.read(self)
-        response = yield self.db_callback(message)
-        yield amqp_instance.publish('', properties.reply_to, response)
-        returnValue(None)
-
-
-class APIRequestCallback(object):
-    def __init__(self, config):
-        self.exchange = config.get('exchange', '')
-        self.routing_key = config.get('routing_key', '')
-
-    @inlineCallbacks
-    def callback(self, amqp_instance):
-        yield amqp_instance.publish(self.exchange, self.routing_key, message)
+        self.queue_name = queue_name

@@ -8,12 +8,11 @@ from twisted.internet.defer import inlineCallbacks, returnValue
 from trackall.main import reactor
 
 
-class BackendDB(object):
-    def __init__(self, config, name):
+class Database(object):
+    def __init__(self, config):
         self.db_engine = config.get('engine', 'MySQLdb')
         self.database = config.get('database', 'tracker')
         self.user = config.get('user', 'root')
-        self.name = name
         self.db_pool = None
         self.connect()
 
@@ -21,24 +20,28 @@ class BackendDB(object):
         self.db_pool = ConnectionPool(self.db_engine, database=self.database, user=self.user)
 
     @inlineCallbacks
-    def insert_geo_record(self, record):
+    def callback(self, message):
         try:
-            yield self.db_pool.runQuery(
-                'INSERT INTO test (user_id, lat, lon, speed, altitude, stamp)'
-                ' VALUES ({id}, {lat}, {lon}, {speed}, {altitude}, FROM_UNIXTIME({timestamp}));'.format(**record)
-            )
+            result = yield self.db_pool.runQuery('select * from test ORDER BY stamp ASC;')
+            # yield self.db_pool.runQuery(
+            #     'INSERT INTO test (user_id, lat, lon, speed, altitude, stamp)'
+            #     ' VALUES ({id}, {lat}, {lon}, {speed}, {altitude}, FROM_UNIXTIME({timestamp}));'.format(**message)
+            # )
+            # result = None
         except OperationalError as e:
             print(' [!] Connection failed: {}'.format(e))
             self.db_pool.close()
             self.connect()
-            yield reactor.callLater(2, self.insert_geo_record, record)
+            result = yield reactor.callLater(1, self.callback, message)
 
-        returnValue(None)
+        returnValue(result)
 
-    def get_geo_path(self, message):
-        try:
-            return self.db_pool.runQuery('select * from test ORDER BY stamp ASC;')
-        except OperationalError:
-            self.db_pool.close()
-            self.connect()
-            return self.get_geo_path()
+
+def config_check(config):
+    return True
+
+
+def initial(config):
+    db = Database(config)
+    db.connect()
+    return db.callback

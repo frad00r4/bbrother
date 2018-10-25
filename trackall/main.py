@@ -4,104 +4,126 @@ from __future__ import unicode_literals, absolute_import
 import sys
 import importlib
 
-try:
-    from Queue import Queue, Empty
-except ImportError:
-    from queue import Queue, Empty
-
+from six.moves import queue
 from twisted.internet import reactor
 from twisted.python import log
 
-from trackall.amqp import AMQPClient, GatePublisherCallback, DBInsertCallback, DBReadGeoDataCallback
-from trackall.config import config
+from trackall.amqp import AMQPClientPermanent
+from trackall.amqp_callbacks import QueueCallback, ListenReplyCallback, RequestResponseCallback
+from trackall.exceptions import ConfigError
 
 
-def run():
-    if config.get('debug', False) is True:
-        log.startLogging(sys.stdout)
+class TrackAll(object):
+    def __init__(self, config):
+        self.protocol_modules = {}
+        self.database_modules = {}
+        self.api_modules = {}
+        self.gate_configs = None
+        self.database_configs = None
+        self.api_configs = None
 
-    protocol_modules = {}
-    db_engine_modules = {}
-    external_api_modules = {}
+        self.read_config(config)
 
-    # gates
-    gate_config = config.get('gate')
-    if gate_config:
-        queues = []
+    def read_config(self, config):
+        if config.get('debug', False) is True:
+            log.startLogging(sys.stdout)
 
-        for gate_instance_name, gate_instance_config in gate_config.items():
-            if not gate_instance_config.get('module'):
-                continue
+        # Read gate configs and load modules
+        self.gate_configs = config.get('gates')
+        if self.gate_configs and not isinstance(self.gate_configs, dict):
+            raise ConfigError('Gates section is not dictionary')
 
-            if gate_instance_config['module'] not in protocol_modules.keys():
-                protocol_modules[gate_instance_config['module']] = \
+        for gate_instance_name, gate_instance_config in self.gate_configs.items():
+            for option in ('module', 'amqp_url'):
+                if not gate_instance_config.get(option):
+                    raise ConfigError('Gate {} has not got option "{}"'.format(gate_instance_name, option))
+
+            if gate_instance_config['module'] not in self.protocol_modules.keys():
+                self.protocol_modules[gate_instance_config['module']] = \
                     importlib.import_module('trackall.protocols.{}'.format(gate_instance_config['module']))
                 print(' [x] Protocol loaded {}'.format(gate_instance_config['module']))
 
-            queue = Queue()
-            protocol_modules[gate_instance_config['module']].initial(gate_instance_config, queue)
-            queues.append(queue)
+            if not self.protocol_modules[gate_instance_config['module']].config_check(gate_instance_config):
+                raise ConfigError('Gate %s: invalid config' % gate_instance_name)
+
+        # Read databases configs and load modules
+        self.database_configs = config.get('databases')
+        if self.database_configs and not isinstance(self.database_configs, dict):
+            raise ConfigError('Databases section is not dictionary')
+
+        for database_instance_name, database_instance_config in self.database_configs.items():
+            for option in ('module', 'amqp_url', 'listen_queue'):
+                if not database_instance_config.get(option):
+                    raise ConfigError('Database {} has not got option "{}"'.format(database_instance_name, option))
+
+            if database_instance_config['module'] not in self.database_modules.keys():
+                self.database_modules[database_instance_config['module']] = \
+                    importlib.import_module('trackall.db.{}'.format(database_instance_config['module']))
+                print(' [x] Database module loaded {}'.format(database_instance_config['module']))
+
+            if not self.database_modules[database_instance_config['module']].config_check(database_instance_config):
+                raise ConfigError('Database module %s: invalid config' % database_instance_name)
+
+        # Read API configs and load modules
+        self.api_configs = config.get('api')
+        if self.api_configs and not isinstance(self.api_configs, dict):
+            raise ConfigError('API section is not dictionary')
+
+        for api_instance_name, api_instance_config in self.api_configs.items():
+            for option in ('module', 'amqp_url'):
+                if not api_instance_config.get(option):
+                    raise ConfigError('API {} has not got option "{}"'.format(api_instance_name, option))
+
+            if api_instance_config['module'] not in self.api_modules.keys():
+                self.api_modules[api_instance_config['module']] = \
+                    importlib.import_module('trackall.api.{}'.format(api_instance_config['module']))
+                print(' [x] API module loaded {}'.format(api_instance_config['module']))
+
+            if not self.api_modules[api_instance_config['module']].config_check(api_instance_config):
+                raise ConfigError('Database module %s: invalid config' % api_instance_name)
+
+    def init_gates(self):
+        publish_queues = []
+        for gate_instance_name, gate_instance_config in self.gate_configs.items():
+            publish_queue = queue.Queue()
+            self.protocol_modules[gate_instance_config['module']].initial(gate_instance_config, publish_queue)
+            publish_queues.append(publish_queue)
             print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
+            amqp_callback = QueueCallback(gate_instance_config, publish_queue)
+            amqp_connection = AMQPClientPermanent(
+                gate_instance_config['amqp_url'],
+                amqp_callback.callback,
+                gate_instance_name
+            )
+            amqp_connection.run()
 
-            gate_callback = GatePublisherCallback(gate_instance_config, queue)
-            amqp_connection = AMQPClient(config['amqp']['url'], gate_callback.callback, gate_instance_name)
-            amqp_connection.connect()
+    def init_database(self):
+        for database_instance_name, database_instance_config in self.database_configs.items():
+            db_callback = self.database_modules[database_instance_config['module']].initial(database_instance_config)
+            print(' [x] Database connection "{}" is running'.format(database_instance_name))
+            amqp_callback = ListenReplyCallback(database_instance_config['listen_queue'], db_callback)
+            amqp_connection = AMQPClientPermanent(
+                database_instance_config['amqp_url'],
+                amqp_callback.callback,
+                database_instance_name
+            )
+            amqp_connection.run()
 
-    # databases insert records from gate
-    db_write_backend_config = config.get('db_write_backend')
-    if db_write_backend_config:
+    def init_api(self):
+        for api_instance_name, api_instance_config in self.api_configs.items():
+            callback = RequestResponseCallback(api_instance_name, api_instance_config)
+            self.api_modules[api_instance_config['module']].initial(api_instance_config,
+                                                                    callback.api_callback)
+            print(' [x] API connection "{}" is running'.format(api_instance_name))
 
-        for db_engine_instance_name, db_engine_instance_config in db_write_backend_config.items():
-            if not db_engine_instance_config.get('module'):
-                continue
+    def run(self):
+        if self.gate_configs:
+            self.init_gates()
+        if self.database_configs:
+            self.init_database()
+        if self.api_configs:
+            self.init_api()
 
-            if db_engine_instance_config['module'] not in db_engine_modules.keys():
-                db_engine_modules[db_engine_instance_config['module']] = \
-                    importlib.import_module('trackall.db.{}'.format(db_engine_instance_config['module']))
-                print(' [x] DB engine loaded {}'.format(db_engine_instance_config['module']))
+        reactor.run()
 
-            db_object = db_engine_modules[db_engine_instance_config['module']].BackendDB(db_engine_instance_config,
-                                                                                        db_engine_instance_name)
-
-            db_insert_callback = DBInsertCallback(db_engine_instance_config, db_object.insert_geo_record)
-            amqp_connection = AMQPClient(config['amqp']['url'], db_insert_callback.callback, db_engine_instance_name)
-            amqp_connection.connect()
-            print(' [x] AMQP Gate Listener for {} start'.format(db_engine_instance_name))
-
-    # databases read records for api
-    db_read_backend_config = config.get('db_read_backend')
-    if db_read_backend_config:
-        for db_engine_instance_name, db_engine_instance_config in db_read_backend_config.items():
-            if not db_engine_instance_config.get('module'):
-                continue
-
-            if db_engine_instance_config['module'] not in db_engine_modules.keys():
-                db_engine_modules[db_engine_instance_config['module']] = \
-                    importlib.import_module('trackall.db.{}'.format(db_engine_instance_config['module']))
-                print(' [x] DB engine loaded {}'.format(db_engine_instance_config['module']))
-
-            db_object = db_engine_modules[db_engine_instance_config['module']].BackendDB(db_engine_instance_config,
-                                                                                        db_engine_instance_name)
-
-            for i in range(int(db_engine_instance_config.get('listeners', 1))):
-                db_read_callback = DBReadGeoDataCallback(db_engine_instance_config, db_object.get_geo_path)
-                amqp_connection = AMQPClient(config['amqp']['url'], db_read_callback.callback, db_engine_instance_name)
-                amqp_connection.connect()
-                print(' [x] AMQP DB Read Listener {} for {} start'.format(i, db_engine_instance_name))
-
-    # api
-    external_api_config = config.get('external_api')
-    if external_api_config:
-        for external_api_instance_name, external_api_instance_config in external_api_config.items():
-            if not external_api_instance_config.get('module'):
-                continue
-
-            if external_api_instance_config['module'] not in external_api_modules.keys():
-                external_api_modules[external_api_instance_config['module']] = \
-                    importlib.import_module('trackall.api.{}'.format(external_api_instance_config['module']))
-                print(' [x] External API module {} loaded'.format(external_api_instance_config['module']))
-
-    # Run
-    reactor.run()
-
-    return 0
+        return 0
