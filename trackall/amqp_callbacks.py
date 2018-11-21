@@ -2,10 +2,11 @@
 from __future__ import unicode_literals, absolute_import
 
 from random import random
-from six.moves import queue as six_queue
-from twisted.internet.defer import inlineCallbacks, returnValue
+from queue import Empty
+from twisted.internet.defer import inlineCallbacks
 
-from trackall.amqp import AMQPClient, ReplyToCheckerContext
+from trackall.objects.db_proto import DataBasePackage, Method
+from trackall.amqp import ReplyToCheckerContext
 
 
 class QueueCallback(object):
@@ -15,17 +16,17 @@ class QueueCallback(object):
         self.queue = queue
 
     @inlineCallbacks
-    def callback(self, amqp_instance):
+    def callback(self, amqp_instance, channel):
         while True:
-            message = ''
             try:
-                message = self.queue.get_nowait()
-            except six_queue.Empty:
-                returnValue(None)
+                geo_point = self.queue.get_nowait()
+            except Empty:
+                return None
             try:
-                yield amqp_instance.publish(self.exchange, self.routing_key, message)
+                message = DataBasePackage(Method.insert, geo_point)
+                yield amqp_instance.publish(channel, self.exchange, self.routing_key, message)
             except Exception:
-                self.queue.put(message)
+                self.queue.put(geo_point)
                 raise
 
 
@@ -36,12 +37,12 @@ class ListenReplyCallback(object):
         self.queue = None
 
     @inlineCallbacks
-    def callback(self, amqp_instance):
-        properties, message = yield amqp_instance.read(self)
+    def callback(self, amqp_instance, channel):
+        properties, message = yield amqp_instance.read(self, channel)
         response = yield self.reply_callback(message)
         if response:
-            yield amqp_instance.publish('', properties.reply_to, response)
-        returnValue(None)
+            yield amqp_instance.publish(channel, '', properties.reply_to, response)
+        return None
 
 
 class RequestResponseCallback(object):
@@ -52,22 +53,16 @@ class RequestResponseCallback(object):
         self.name = name
 
     @inlineCallbacks
-    def amqp_callback(self, amqp_instance, message):
+    def callback(self, amqp_instance, message: DataBasePackage):
         queue_name = self.name + '_' + str(random())
-        yield amqp_instance.channel.queue_declare(queue=queue_name, auto_delete=True, exclusive=False)
-        query_queue, _ = yield amqp_instance.channel.basic_consume(queue=queue_name, no_ack=True)
-        yield amqp_instance.publish(self.exchange, self.routing_key, message, reply_to=queue_name)
+        channel = yield amqp_instance.connection.channel()
 
+        yield channel.queue_declare(queue=queue_name, auto_delete=True, exclusive=False)
+        query_queue, _ = yield channel.basic_consume(queue=queue_name, no_ack=True)
         query_queue_context = ReplyToCheckerContext(queue_name, query_queue)
-        _, message = yield amqp_instance.read(query_queue_context)
-        returnValue(message)
 
-    @inlineCallbacks
-    def api_callback(self, message):
-        amqp_connection = AMQPClient(
-            self.amqp_url,
-            self.amqp_callback,
-            self.name
-        )
-        result = yield amqp_connection.run(message=message)
-        returnValue(result)
+        yield amqp_instance.publish(channel, self.exchange, self.routing_key, message, reply_to=queue_name)
+
+        _, message = yield amqp_instance.read(query_queue_context, channel)
+        channel.close()
+        return message

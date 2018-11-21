@@ -2,11 +2,9 @@
 from __future__ import unicode_literals, absolute_import
 
 import abc
-import ujson
-import six
 
 from twisted.internet import task
-from twisted.internet.defer import inlineCallbacks, returnValue
+from twisted.internet.defer import inlineCallbacks
 from twisted.internet.error import ConnectionRefusedError
 from twisted.internet.protocol import ClientCreator
 from pika.adapters.twisted_connection import TwistedProtocolConnection
@@ -17,15 +15,14 @@ from pika.spec import BasicProperties
 from trackall.main import reactor
 
 
-@six.add_metaclass(abc.ABCMeta)
-class AMQPClientAbstract(object):
+class AMQPClientAbstract(metaclass=abc.ABCMeta):
 
     def __init__(self, url, callback, name=''):
         self.parameters = URLParameters(url)
         self.client = ClientCreator(reactor, TwistedProtocolConnection, self.parameters)
         self.name = name
+        self.connection = None
         self.callback = callback
-        self.channel = None
 
     def error_connection_callback(self, failure):
         failure.trap(ConnectionRefusedError, ChannelClosed)
@@ -34,25 +31,37 @@ class AMQPClientAbstract(object):
         reactor.callLater(2, self.run)
 
     @inlineCallbacks
-    def publish(self, exchange, routing_key, message, **kwargs):
+    def publish(self, channel, exchange, routing_key, message, **kwargs):
+        close_channel = False
+        if channel is None:
+            channel = yield self.connection.channel()
+            close_channel = True
+
         properties = BasicProperties(**kwargs)
-        yield self.channel.basic_publish(exchange, routing_key, ujson.dumps(message), properties)
-        returnValue(None)
+        yield channel.basic_publish(exchange, routing_key, message.serialize(), properties)
+
+        if close_channel is True:
+            channel.close()
+
+        return None
 
     @inlineCallbacks
-    def read(self, context):
+    def read(self, context, channel=None):
+        close_channel = False
+        if channel is None:
+            channel = yield self.connection.channel()
+            close_channel = True
+
         if context.queue is None:
-            yield self.channel.queue_declare(queue=context.queue_name, auto_delete=True, exclusive=False)
-            context.queue, _ = yield self.channel.basic_consume(queue=context.queue_name, no_ack=True)
+            yield channel.queue_declare(queue=context.queue_name, auto_delete=True, exclusive=False)
+            context.queue, _ = yield channel.basic_consume(queue=context.queue_name, no_ack=True)
 
         _, _, properties, body = yield context.queue.get()
-        message = None
-        try:
-            message = ujson.loads(body)
-        except ValueError:
-            print(' [!] AMQP {}.invalid JSON: {}'.format(self.name, body))
-            returnValue((None, None))
-        returnValue((properties, message))
+
+        if close_channel is True:
+            channel.close()
+
+        return properties, body
 
     @abc.abstractmethod
     def run(self):
@@ -69,16 +78,17 @@ class AMQPClientPermanent(AMQPClientAbstract):
     @inlineCallbacks
     def run_loop(self, connection):
         if not connection:
-            returnValue(None)
+            return None
         print(' [x] Connected to AMQP {} permanent'.format(self.name))
 
-        self.channel = yield connection.channel()
+        self.connection = yield connection
+        channel = yield self.connection.channel()
 
-        loop = task.LoopingCall(self.callback, self)
+        loop = task.LoopingCall(self.callback, self, channel)
         d = loop.start(0.1)
         d.addErrback(self.error_connection_callback)
 
-        returnValue(None)
+        return None
 
 
 class AMQPClient(AMQPClientAbstract):
@@ -92,17 +102,40 @@ class AMQPClient(AMQPClientAbstract):
     @inlineCallbacks
     def execute_callback(self, connection, *args, **kwargs):
         if not connection:
-            returnValue(None)
+            return None
         print(' [x] Connected to AMQP {}'.format(self.name))
 
-        self.channel = yield connection.channel()
-        result = yield self.callback(self, *args, **kwargs)
-        self.channel.close()
-        self.channel = None
+        self.connection = yield connection
+        channel = yield self.connection.channel()
+        result = yield self.callback(self, channel, *args, **kwargs)
+        channel.close()
         connection.close()
         print(' [x] AMQP Disconnected {}'.format(self.name))
 
-        returnValue(result)
+        return result
+
+
+class AMQPClientPermanentCallback(AMQPClientAbstract):
+    def __init__(self, url, callback, name=''):
+        super().__init__(url, callback, name)
+        self.connection = None
+
+    def run(self, *args, **kwargs):
+        d = self.client.connectTCP(self.parameters.host, self.parameters.port)
+        d.addCallbacks(lambda protocol: protocol.ready, self.error_connection_callback)
+        d.addCallback(self.make_connection)
+        return d
+
+    def make_connection(self, connection):
+        if not connection:
+            return None
+        print(' [x] Connected to AMQP {} permanent'.format(self.name))
+        self.connection = connection
+
+    @inlineCallbacks
+    def run_callback(self, channel, *args, **kwargs):
+        result = yield self.callback(self, channel, *args, **kwargs)
+        return result
 
 
 class ReplyToCheckerContext(object):

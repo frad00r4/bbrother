@@ -4,11 +4,11 @@ from __future__ import unicode_literals, absolute_import
 import sys
 import importlib
 
-from six.moves import queue
+from queue import Queue
 from twisted.internet import reactor
 from twisted.python import log
 
-from trackall.amqp import AMQPClientPermanent
+from trackall.amqp import AMQPClientPermanent, AMQPClientPermanentCallback
 from trackall.amqp_callbacks import QueueCallback, ListenReplyCallback, RequestResponseCallback
 from trackall.exceptions import ConfigError
 
@@ -85,17 +85,17 @@ class TrackAll(object):
     def init_gates(self):
         publish_queues = []
         for gate_instance_name, gate_instance_config in self.gate_configs.items():
-            publish_queue = queue.Queue()
-            self.protocol_modules[gate_instance_config['module']].initial(gate_instance_config, publish_queue)
-            publish_queues.append(publish_queue)
-            print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
-            amqp_callback = QueueCallback(gate_instance_config, publish_queue)
-            amqp_connection = AMQPClientPermanent(
-                gate_instance_config['amqp_url'],
-                amqp_callback.callback,
-                gate_instance_name
-            )
-            amqp_connection.run()
+             publish_queue = Queue()
+             self.protocol_modules[gate_instance_config['module']].initial(gate_instance_config, publish_queue)
+             publish_queues.append(publish_queue)
+             print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
+             amqp_callback = QueueCallback(gate_instance_config, publish_queue)
+             amqp_connection = AMQPClientPermanent(
+                 gate_instance_config['amqp_url'],
+                 amqp_callback.callback,
+                 gate_instance_name
+             )
+             amqp_connection.run()
 
     def init_database(self):
         for database_instance_name, database_instance_config in self.database_configs.items():
@@ -111,9 +111,16 @@ class TrackAll(object):
 
     def init_api(self):
         for api_instance_name, api_instance_config in self.api_configs.items():
-            callback = RequestResponseCallback(api_instance_name, api_instance_config)
+            amqp_callback = RequestResponseCallback(api_instance_name, api_instance_config)
+            amqp_connection = AMQPClientPermanentCallback(
+                api_instance_config['amqp_url'],
+                amqp_callback.callback,
+                api_instance_name
+            )
+            amqp_connection.run()
+
             self.api_modules[api_instance_config['module']].initial(api_instance_config,
-                                                                    callback.api_callback)
+                                                                    amqp_connection.run_callback)
             print(' [x] API connection "{}" is running'.format(api_instance_name))
 
     def run(self):

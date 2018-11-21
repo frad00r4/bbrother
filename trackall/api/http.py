@@ -8,6 +8,7 @@ from twisted.web.resource import Resource
 from twisted.web.server import Site, NOT_DONE_YET
 from twisted.internet.endpoints import TCP4ServerEndpoint
 
+from trackall.objects.db_proto import DataBasePackage, Method, Target, Selector, DataBaseResponse
 from trackall.main import reactor
 
 
@@ -24,22 +25,24 @@ class WebApi(Resource):
         request.setHeader('Access-Control-Allow-Methods', 'GET')
         request.setHeader('Access-Control-Allow-Headers', 'x-prototype-version,x-requested-with')
         request.setHeader('Access-Control-Max-Age', 2520)
+        request.setHeader('Content-Type', 'application/json')
 
         # TODO: Parse request
-        api_request = None
+        selector = Selector(Target.geo, {})
+        api_request = DataBasePackage(Method.select, selector=selector)
 
-        self.webapi_callback(api_request, request)
+        self.web_api_callback(api_request, request)
         return NOT_DONE_YET
 
-    def _api_response(self, response, request):
-        result = [
-            {'lat': record[2], 'lng': record[3], 'speed': record[4], 'altitude': record[5], 'stamp': record[6]}
-            for record in response
-        ]
+    def _api_response(self, response: str, request):
+        db_response = DataBaseResponse.deserialize(response)
+        result = [{'lat': obj.latitude, 'lng': obj.longitude, 'speed': obj.speed,
+                   'altitude': obj.altitude, 'stamp': obj.timestamp}
+                  for obj in db_response.objects]
         request.write(ujson.dumps(result).encode('utf-8'))
         request.finish()
 
-    def webapi_callback(self, api_request, request):
+    def web_api_callback(self, api_request: DataBasePackage, request):
         d = self.callback(api_request)
         d.addCallback(self._api_response, request)
 
@@ -52,4 +55,5 @@ def initial(config, callback):
 
 
 def config_check(config):
+    # TODO: Add checker
     return True

@@ -3,36 +3,100 @@ from __future__ import unicode_literals, absolute_import
 
 import ujson
 
+from enum import Enum
+from typing import TypeVar, Generic, Dict, List
 
-METHODS = ('query', 'insert')
+from trackall.objects.geo_point import GeoPoint
+from trackall.objects.tracker import Tracker
 
 
-class DataBaseProtocol(object):
-    def __init__(self, message_type, header, body=None):
-        self.type = message_type
-        self.header = header
-        self.body = body if body else {}
+TargetTypes = TypeVar('TargetTypes', GeoPoint, Tracker)
+DataBasePackageType = TypeVar('DataBasePackageType')
+SelectorType = TypeVar('SelectorType')
+DataBaseResponseType = TypeVar('DataBaseResponseType')
 
-    def serialize(self):
-        return ujson.dumps({'message_type': self.type, 'header': self.header, 'body': self.body})
+
+class Method(Enum):
+    select = 0
+    insert = 1
+    update = 2
+    delete = 3
+
+
+class Target(Enum):
+    geo = GeoPoint
+    tracker = Tracker
+
+
+class Selector(Generic[SelectorType]):
+    def __init__(self, target: Target, selector: Dict, limit: int=None, offset: int=None) -> None:
+        self.target = target
+        self.selector = selector
+        self.limit = limit
+        self.offset = offset
+
+    def serialize(self) -> str:
+        return ujson.dumps({'target': self.target.name,
+                            'selector': self.selector,
+                            'limit': self.limit,
+                            'offset': self.offset})
 
     @classmethod
-    def deserialize(cls, json):
+    def deserialize(cls, json: str) -> SelectorType:
         data = ujson.loads(json)
-        return cls(**data)
+        return cls(
+            Target[data['target']],
+            data['selector'],
+            data['limit'],
+            data['offset']
+        )
+
+
+class DataBasePackage(Generic[DataBasePackageType]):
+    def __init__(self, method: Method, target: TargetTypes=None, selector: Selector=None, silent: bool=False) -> None:
+        self.method = method
+        self.target_object = Target(type(target)) if target else None
+        self.target = target
+        self.selector = selector
+        self.silent = silent
+
+    def serialize(self) -> str:
+        return ujson.dumps({'method': self.method.value,
+                            'target': self.target.serialize() if self.target else None,
+                            'target_object': self.target_object.name if self.target_object else None,
+                            'selector': self.selector.serialize() if self.selector else None,
+                            'silent': self.silent})
 
     @classmethod
-    def geo_query(cls, request):
-        header = {'method': 'query', 'type': 'geo'}
-        body = {'filter': request}
-        return cls('request', header, body)
+    def deserialize(cls, json: str) -> DataBasePackageType:
+        data = ujson.loads(json)
+        return cls(
+            Method(data['method']),
+            Target[data['target_object']].value.deserialize(data['target']) if data['target'] else None,
+            Selector.deserialize(data['selector']) if data['selector'] else None,
+            data['silent']
+        )
+
+    def __str__(self) -> str:
+        return 'Method: {}, Target: {}, Selector: {}'.format(
+            self.method.name,
+            self.target.serialize() if self.target else None,
+            ujson.dumps(self.selector.serialize()))
+
+
+class DataBaseResponse(Generic[DataBaseResponseType]):
+    def __init__(self, objects: List[TargetTypes]) -> None:
+        self.objects = objects
+        self.length = len(self.objects)
+        self.object_type = Target(type(self.objects[0]))
+
+    def serialize(self) -> str:
+        return ujson.dumps({'objects': [obj.serialize() for obj in self.objects],
+                            'object_type': self.object_type.name})
 
     @classmethod
-    def geo_response(cls, result):
-        header = {'type': 'geo'}
-        records = [
-            {'lat': record[2], 'lng': record[3], 'speed': record[4], 'altitude': record[5], 'stamp': record[6]}
-            for record in result
-        ]
-        body = {'geo': records}
-        return cls('request', header, body)
+    def deserialize(cls, json: str) -> DataBaseResponseType:
+        data = ujson.loads(json)
+        objects = [Target[data['object_type']].value.deserialize(obj_json)
+                   for obj_json in data['objects']]
+        return cls(objects)
