@@ -4,12 +4,11 @@ from __future__ import unicode_literals, absolute_import
 import sys
 import importlib
 
-from queue import Queue
 from twisted.internet import reactor
 from twisted.python import log
 
 from trackall.amqp import AMQPClientPermanent, AMQPClientPermanentCallback
-from trackall.amqp_callbacks import QueueCallback, ListenReplyCallback, RequestResponseCallback
+from trackall.amqp_callbacks import ListenReplyCallback, RequestResponseCallback
 from trackall.exceptions import ConfigError
 
 
@@ -83,19 +82,18 @@ class TrackAll(object):
                 raise ConfigError('Database module %s: invalid config' % api_instance_name)
 
     def init_gates(self):
-        publish_queues = []
         for gate_instance_name, gate_instance_config in self.gate_configs.items():
-             publish_queue = Queue()
-             self.protocol_modules[gate_instance_config['module']].initial(gate_instance_config, publish_queue)
-             publish_queues.append(publish_queue)
-             print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
-             amqp_callback = QueueCallback(gate_instance_config, publish_queue)
-             amqp_connection = AMQPClientPermanent(
-                 gate_instance_config['amqp_url'],
-                 amqp_callback.callback,
-                 gate_instance_name
-             )
-             amqp_connection.run()
+            amqp_callback = RequestResponseCallback(gate_instance_name, gate_instance_config)
+            amqp_connection = AMQPClientPermanentCallback(
+                gate_instance_config['amqp_url'],
+                amqp_callback.callback,
+                gate_instance_name
+            )
+            amqp_connection.run()
+
+            self.protocol_modules[gate_instance_config['module']].initial(gate_instance_config,
+                                                                          amqp_connection.run_callback)
+            print(' [x] Gate "{}" is awaiting for requests'.format(gate_instance_name))
 
     def init_database(self):
         for database_instance_name, database_instance_config in self.database_configs.items():

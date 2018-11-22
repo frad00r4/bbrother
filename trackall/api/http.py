@@ -31,20 +31,18 @@ class WebApi(Resource):
         selector = Selector(Target.geo, {})
         api_request = DataBasePackage(Method.select, selector=selector)
 
-        self.web_api_callback(api_request, request)
+        d = self.callback(api_request)
+        d.addCallback(self.proto_response, request)
+
         return NOT_DONE_YET
 
-    def _api_response(self, response: str, request):
+    def proto_response(self, response: str, request):
         db_response = DataBaseResponse.deserialize(response)
         result = [{'lat': obj.latitude, 'lng': obj.longitude, 'speed': obj.speed,
                    'altitude': obj.altitude, 'stamp': obj.timestamp}
                   for obj in db_response.objects]
         request.write(ujson.dumps(result).encode('utf-8'))
         request.finish()
-
-    def web_api_callback(self, api_request: DataBasePackage, request):
-        d = self.callback(api_request)
-        d.addCallback(self._api_response, request)
 
 
 def initial(config, callback):

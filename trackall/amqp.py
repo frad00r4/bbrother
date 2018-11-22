@@ -17,7 +17,7 @@ from trackall.main import reactor
 
 class AMQPClientAbstract(metaclass=abc.ABCMeta):
 
-    def __init__(self, url, callback, name=''):
+    def __init__(self, url: str, callback, name: str=''):
         self.parameters = URLParameters(url)
         self.client = ClientCreator(reactor, TwistedProtocolConnection, self.parameters)
         self.name = name
@@ -38,7 +38,12 @@ class AMQPClientAbstract(metaclass=abc.ABCMeta):
             close_channel = True
 
         properties = BasicProperties(**kwargs)
-        yield channel.basic_publish(exchange, routing_key, message.serialize(), properties)
+        yield channel.basic_publish(
+            exchange,
+            routing_key,
+            message.serialize() if message else 'Done',
+            properties
+        )
 
         if close_channel is True:
             channel.close()
@@ -116,7 +121,7 @@ class AMQPClient(AMQPClientAbstract):
 
 
 class AMQPClientPermanentCallback(AMQPClientAbstract):
-    def __init__(self, url, callback, name=''):
+    def __init__(self, url: str, callback, name: str=''):
         super().__init__(url, callback, name)
         self.connection = None
 
@@ -139,6 +144,6 @@ class AMQPClientPermanentCallback(AMQPClientAbstract):
 
 
 class ReplyToCheckerContext(object):
-    def __init__(self, queue_name, queue):
+    def __init__(self, queue_name: str, queue):
         self.queue = queue
         self.queue_name = queue_name

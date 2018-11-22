@@ -66,6 +66,7 @@ VALUES
 
 
 def config_check(config: Dict) -> bool:
+    # TODO: Add checker
     return True
 
 

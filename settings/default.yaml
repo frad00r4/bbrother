@@ -28,4 +28,3 @@ api:
     port: 8080
     exchange: ''
     routing_key: test_db_queue
-    amqp_connections: 1

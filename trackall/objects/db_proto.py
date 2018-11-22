@@ -88,11 +88,11 @@ class DataBaseResponse(Generic[DataBaseResponseType]):
     def __init__(self, objects: List[TargetTypes]) -> None:
         self.objects = objects
         self.length = len(self.objects)
-        self.object_type = Target(type(self.objects[0]))
+        self.object_type = Target(type(self.objects[0])) if self.objects else None
 
     def serialize(self) -> str:
         return ujson.dumps({'objects': [obj.serialize() for obj in self.objects],
-                            'object_type': self.object_type.name})
+                            'object_type': self.object_type.name if self.object_type else None})
 
     @classmethod
     def deserialize(cls, json: str) -> DataBaseResponseType:

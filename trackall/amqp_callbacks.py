@@ -2,32 +2,10 @@
 from __future__ import unicode_literals, absolute_import
 
 from random import random
-from queue import Empty
 from twisted.internet.defer import inlineCallbacks
 
-from trackall.objects.db_proto import DataBasePackage, Method
+from trackall.objects.db_proto import DataBasePackage
 from trackall.amqp import ReplyToCheckerContext
-
-
-class QueueCallback(object):
-    def __init__(self, config, queue):
-        self.exchange = config.get('exchange', '')
-        self.routing_key = config.get('routing_key', '')
-        self.queue = queue
-
-    @inlineCallbacks
-    def callback(self, amqp_instance, channel):
-        while True:
-            try:
-                geo_point = self.queue.get_nowait()
-            except Empty:
-                return None
-            try:
-                message = DataBasePackage(Method.insert, geo_point)
-                yield amqp_instance.publish(channel, self.exchange, self.routing_key, message)
-            except Exception:
-                self.queue.put(geo_point)
-                raise
 
 
 class ListenReplyCallback(object):
@@ -40,8 +18,7 @@ class ListenReplyCallback(object):
     def callback(self, amqp_instance, channel):
         properties, message = yield amqp_instance.read(self, channel)
         response = yield self.reply_callback(message)
-        if response:
-            yield amqp_instance.publish(channel, '', properties.reply_to, response)
+        yield amqp_instance.publish(channel, '', properties.reply_to, response)
         return None
 
 
