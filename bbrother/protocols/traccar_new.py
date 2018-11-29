@@ -7,10 +7,10 @@ from twisted.web.resource import Resource
 from twisted.web.server import Site, NOT_DONE_YET
 from twisted.internet.endpoints import TCP4ServerEndpoint
 
-from trackall.objects.db_proto import DataBasePackage, Method
-from trackall.objects.geo_point import GeoPoint
-from trackall.objects.tracker import Tracker, IdentifyType
-from trackall.main import reactor
+from bbrother.objects.db_proto import DataBasePackage, Method
+from bbrother.objects.geo_point import GeoPoint
+from bbrother.objects.tracker import Tracker, IdentifyType
+from bbrother.main import reactor
 
 
 class OSMProtocol(Resource):

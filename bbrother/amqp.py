@@ -12,7 +12,7 @@ from pika.connection import URLParameters
 from pika.exceptions import ChannelClosed
 from pika.spec import BasicProperties
 
-from trackall.main import reactor
+from bbrother.main import reactor
 
 
 class AMQPClientAbstract(metaclass=abc.ABCMeta):

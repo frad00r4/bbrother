@@ -6,8 +6,8 @@ import ujson
 from enum import Enum
 from typing import TypeVar, Generic, Dict, List
 
-from trackall.objects.geo_point import GeoPoint
-from trackall.objects.tracker import Tracker
+from bbrother.objects.geo_point import GeoPoint
+from bbrother.objects.tracker import Tracker
 
 
 TargetTypes = TypeVar('TargetTypes', GeoPoint, Tracker)

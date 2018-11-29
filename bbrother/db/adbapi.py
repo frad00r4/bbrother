@@ -6,9 +6,9 @@ from pymysql.err import OperationalError
 from twisted.enterprise.adbapi import ConnectionPool
 from twisted.internet.defer import inlineCallbacks
 
-from trackall.objects.geo_point import GeoPoint
-from trackall.objects.db_proto import DataBasePackage, Method, Target, DataBaseResponse
-from trackall.main import reactor
+from bbrother.objects.geo_point import GeoPoint
+from bbrother.objects.db_proto import DataBasePackage, Method, Target, DataBaseResponse
+from bbrother.main import reactor
 
 
 class Database(object):
@@ -38,16 +38,17 @@ class Database(object):
                         'altitude': db_package.target.altitude,
                         'timestamp': db_package.target.timestamp
                     }
+                    # TODO: Fix hardcode tracker id
                     yield self.db_pool.runQuery('''
-INSERT INTO test 
-    (user_id, lat, lon, speed, altitude, stamp)
+INSERT INTO geodata 
+    (tracker_id, lat, lon, speed, altitude, stamp)
 VALUES 
-    ({id}, {lat}, {lon}, {speed}, {altitude}, FROM_UNIXTIME({timestamp}));
+    (1, {lat}, {lon}, {speed}, {altitude}, FROM_UNIXTIME({timestamp}));
 '''.format(**params))
 
             if db_package.method == Method.select:
                 if db_package.selector.target == Target.geo:
-                    rows = yield self.db_pool.runQuery('SELECT * FROM test ORDER BY stamp ASC;')
+                    rows = yield self.db_pool.runQuery('SELECT * FROM geodata ORDER BY stamp ASC;')
                     response = [GeoPoint(
                         latitude=row[2],
                         longitude=row[3],

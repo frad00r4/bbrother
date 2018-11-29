@@ -6,7 +6,7 @@ import ujson
 
 from typing import TypeVar, Generic
 
-from trackall.objects.tracker import Tracker
+from bbrother.objects.tracker import Tracker
 
 
 GeoPointType = TypeVar('GeoPointType')

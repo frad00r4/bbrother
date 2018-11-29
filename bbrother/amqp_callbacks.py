@@ -4,8 +4,8 @@ from __future__ import unicode_literals, absolute_import
 from random import random
 from twisted.internet.defer import inlineCallbacks
 
-from trackall.objects.db_proto import DataBasePackage
-from trackall.amqp import ReplyToCheckerContext
+from bbrother.objects.db_proto import DataBasePackage
+from bbrother.amqp import ReplyToCheckerContext
 
 
 class ListenReplyCallback(object):
