@@ -3,6 +3,7 @@ from __future__ import unicode_literals, absolute_import
 
 import sys
 import importlib
+import copy
 
 from twisted.internet import reactor
 from twisted.python import log
@@ -20,6 +21,7 @@ class TrackAll(object):
         self.gate_configs = None
         self.database_configs = None
         self.api_configs = None
+        self.base_config = None
 
         self.read_config(config)
 
@@ -27,59 +29,44 @@ class TrackAll(object):
         if config.get('debug', False) is True:
             log.startLogging(sys.stdout)
 
-        # Read gate configs and load modules
-        self.gate_configs = config.get('gates')
-        if self.gate_configs and not isinstance(self.gate_configs, dict):
-            raise ConfigError('Gates section is not dictionary')
+        # Make base config data
+        base_config = {
+            item: config.get(item)
+            for item in ('amqp_url', 'redis_server', 'redis_port', 'redis_db')
+            if config.get(item) is not None
+        }
 
-        for gate_instance_name, gate_instance_config in self.gate_configs.items():
-            for option in ('module', 'amqp_url'):
-                if not gate_instance_config.get(option):
-                    raise ConfigError('Gate {} has not got option "{}"'.format(gate_instance_name, option))
+        loader_data_list = [
+            ['Gate', {'module', 'amqp_url'}, 'gate_configs', 'gates', 'protocol_modules'],
+            ['Database', {'module', 'amqp_url', 'listen_queue'}, 'database_configs', 'databases', 'database_modules'],
+            ['API', {'module', 'amqp_url'}, 'api_configs', 'api', 'api_modules']
+        ]
 
-            if gate_instance_config['module'] not in self.protocol_modules.keys():
-                self.protocol_modules[gate_instance_config['module']] = \
-                    importlib.import_module('bbrother.protocols.{}'.format(gate_instance_config['module']))
-                print(' [x] Protocol loaded {}'.format(gate_instance_config['module']))
+        for mod_type_name, base_options, configs_attr, configs_section, modules_attr in loader_data_list:
+            setattr(self, configs_attr, {})
+            configs = config.get(configs_section)
+            if configs and not isinstance(configs, dict):
+                raise ConfigError('{} section is not dictionary'.format(mod_type_name))
 
-            if not self.protocol_modules[gate_instance_config['module']].config_check(gate_instance_config):
-                raise ConfigError('Gate %s: invalid config' % gate_instance_name)
+            for instance_name, instance_config in configs.items():
+                instance_config_full = copy.copy(base_config)
+                instance_config_full.update(instance_config)
 
-        # Read databases configs and load modules
-        self.database_configs = config.get('databases')
-        if self.database_configs and not isinstance(self.database_configs, dict):
-            raise ConfigError('Databases section is not dictionary')
+                options = list(base_options - set(instance_config_full.keys()))
+                for option in options:
+                    if not config.get(option):
+                        raise ConfigError('{} {} has not got option "{}"'.format(mod_type_name, instance_name, option))
 
-        for database_instance_name, database_instance_config in self.database_configs.items():
-            for option in ('module', 'amqp_url', 'listen_queue'):
-                if not database_instance_config.get(option):
-                    raise ConfigError('Database {} has not got option "{}"'.format(database_instance_name, option))
+                if instance_config['module'] not in getattr(self, modules_attr, {}).keys():
+                    getattr(self, modules_attr, {})[instance_config_full['module']] = \
+                        importlib.import_module('bbrother.{}.{}'.format(configs_section,
+                                                                        instance_config_full['module']))
+                    print(' [x] {} loaded {}'.format(mod_type_name, instance_config_full['module']))
 
-            if database_instance_config['module'] not in self.database_modules.keys():
-                self.database_modules[database_instance_config['module']] = \
-                    importlib.import_module('bbrother.db.{}'.format(database_instance_config['module']))
-                print(' [x] Database module loaded {}'.format(database_instance_config['module']))
+                if not getattr(self, modules_attr, {})[instance_config_full['module']].config_check(instance_config_full):
+                    raise ConfigError('{} {}: invalid config'.format(mod_type_name, instance_name))
 
-            if not self.database_modules[database_instance_config['module']].config_check(database_instance_config):
-                raise ConfigError('Database module %s: invalid config' % database_instance_name)
-
-        # Read API configs and load modules
-        self.api_configs = config.get('api')
-        if self.api_configs and not isinstance(self.api_configs, dict):
-            raise ConfigError('API section is not dictionary')
-
-        for api_instance_name, api_instance_config in self.api_configs.items():
-            for option in ('module', 'amqp_url'):
-                if not api_instance_config.get(option):
-                    raise ConfigError('API {} has not got option "{}"'.format(api_instance_name, option))
-
-            if api_instance_config['module'] not in self.api_modules.keys():
-                self.api_modules[api_instance_config['module']] = \
-                    importlib.import_module('bbrother.api.{}'.format(api_instance_config['module']))
-                print(' [x] API module loaded {}'.format(api_instance_config['module']))
-
-            if not self.api_modules[api_instance_config['module']].config_check(api_instance_config):
-                raise ConfigError('Database module %s: invalid config' % api_instance_name)
+                getattr(self, configs_attr, {})[instance_name] = instance_config_full
 
     def init_gates(self):
         for gate_instance_name, gate_instance_config in self.gate_configs.items():

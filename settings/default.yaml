@@ -1,4 +1,11 @@
 debug: true
+
+redis_server: 127.0.0.1
+redis_port: 6379
+redis_db: 0
+
+amqp_url: 'amqp://guest:guest@localhost/'
+
 gates:
   gate_test_1:
     module: traccar_new
@@ -24,7 +31,7 @@ databases:
 api:
   web_api_test_1:
     module: http
-    amqp_url: 'amqp://guest:guest@localhost/'
+#    amqp_url: 'amqp://guest:guest@localhost/'
     port: 8080
     exchange: ''
     routing_key: test_db_queue

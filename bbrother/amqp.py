@@ -15,9 +15,10 @@ from pika.spec import BasicProperties
 from bbrother.main import reactor
 
 
-class AMQPClientAbstract(metaclass=abc.ABCMeta):
+class AMQPClientAbstract(object):
+    __metaclass__ = abc.ABCMeta
 
-    def __init__(self, url: str, callback, name: str=''):
+    def __init__(self, url: str, callback, name: str = ''):
         self.parameters = URLParameters(url)
         self.client = ClientCreator(reactor, TwistedProtocolConnection, self.parameters)
         self.name = name
