@@ -19,14 +19,7 @@ databases:
     amqp_url: 'amqp://guest:guest@localhost/'
     listen_queue: test_db_queue
     engine: pymysql
-    database: tracker
-    user: root
-  db_backend_test_2:
-    module: adbapi
-    amqp_url: 'amqp://guest:guest@localhost/'
-    listen_queue: test_db_queue
-    engine: pymysql
-    database: tracker
+    database: bbrother
     user: root
 api:
   web_api_test_1:

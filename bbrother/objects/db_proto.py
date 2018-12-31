@@ -8,9 +8,10 @@ from typing import TypeVar, Generic, Dict, List
 
 from bbrother.objects.geo_point import GeoPoint
 from bbrother.objects.tracker import Tracker
+from bbrother.objects.user import User
 
 
-TargetTypes = TypeVar('TargetTypes', GeoPoint, Tracker)
+TargetTypes = TypeVar('TargetTypes', GeoPoint, Tracker, User)
 DataBasePackageType = TypeVar('DataBasePackageType')
 SelectorType = TypeVar('SelectorType')
 DataBaseResponseType = TypeVar('DataBaseResponseType')
@@ -26,10 +27,11 @@ class Method(Enum):
 class Target(Enum):
     geo = GeoPoint
     tracker = Tracker
+    user = User
 
 
 class Selector(Generic[SelectorType]):
-    def __init__(self, target: Target, selector: Dict, limit: int=None, offset: int=None) -> None:
+    def __init__(self, target: Target, selector: Dict, limit: int = None, offset: int = None) -> None:
         self.target = target
         self.selector = selector
         self.limit = limit
@@ -53,7 +55,8 @@ class Selector(Generic[SelectorType]):
 
 
 class DataBasePackage(Generic[DataBasePackageType]):
-    def __init__(self, method: Method, target: TargetTypes=None, selector: Selector=None, silent: bool=False) -> None:
+    def __init__(self, method: Method, target: TargetTypes = None,
+                 selector: Selector = None, silent: bool = False) -> None:
         self.method = method
         self.target_object = Target(type(target)) if target else None
         self.target = target

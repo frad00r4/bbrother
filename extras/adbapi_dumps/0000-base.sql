@@ -3,7 +3,7 @@
 CREATE TABLE `users` (
   `id` INT(11) NOT NULL AUTO_INCREMENT,
   `login` VARCHAR(256) NOT NULL,
-  `password` VARCHAR(256) NOT NULL,
+  `password_hash` VARCHAR(256) NOT NULL,
   `stamp` TIMESTAMP NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `IX_login` (`login`)

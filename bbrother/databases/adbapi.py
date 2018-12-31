@@ -7,6 +7,7 @@ from twisted.enterprise.adbapi import ConnectionPool
 from twisted.internet.defer import inlineCallbacks
 
 from bbrother.objects.geo_point import GeoPoint
+from bbrother.objects.user import User
 from bbrother.objects.db_proto import DataBasePackage, Method, Target, DataBaseResponse
 from bbrother.main import reactor
 
@@ -27,7 +28,6 @@ class Database(object):
         db_package = DataBasePackage.deserialize(message)
         result = None
         try:
-
             if db_package.method == Method.insert:
                 if isinstance(db_package.target, GeoPoint):
                     params = {
@@ -47,8 +47,30 @@ VALUES
 '''.format(**params))
 
             if db_package.method == Method.select:
+                query = ''
+                selectors = []
+
                 if db_package.selector.target == Target.geo:
-                    rows = yield self.db_pool.runQuery('SELECT * FROM geodata ORDER BY stamp ASC;')
+                    query = 'SELECT * FROM geodata'
+                elif db_package.selector.target == Target.user:
+                    query = 'SELECT * FROM users'
+                    if db_package.selector.selector.get('login'):
+                        selectors.append('login = "%s"' % db_package.selector.selector.get('login'))
+                    if db_package.selector.selector.get('password_hash'):
+                        selectors.append('password_hash = "%s"' % db_package.selector.selector.get('password_hash'))
+                    if db_package.selector.selector.get('user_id'):
+                        selectors.append('id = %s' % db_package.selector.selector.get('user_id'))
+
+                if selectors:
+                    query += ' WHERE {}'.format(' AND '.join(selectors))
+                if db_package.selector.offset:
+                    query += ' OFFSET %d' % db_package.selector.offset
+                if db_package.selector.limit:
+                    query += ' LIMIT %d' % db_package.selector.limit
+
+                rows = yield self.db_pool.runQuery(query)
+
+                if db_package.selector.target == Target.geo:
                     response = [GeoPoint(
                         latitude=row[2],
                         longitude=row[3],
@@ -56,7 +78,18 @@ VALUES
                         timestamp=row[6],
                         speed=row[4]
                     ) for row in rows]
-                    result = DataBaseResponse(response)
+                elif db_package.selector.target == Target.user:
+                    response = [User(
+                        user_id=row[0],
+                        login=row[1],
+                        password_hash=row[2],
+                        stamp=row[3]
+                    ) for row in rows]
+                else:
+                    response = []
+
+                result = DataBaseResponse(response)
+
         except OperationalError as e:
             print(' [!] Connection failed: {}'.format(e))
             self.db_pool.close()
